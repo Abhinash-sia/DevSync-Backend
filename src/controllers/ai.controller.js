@@ -8,9 +8,7 @@ import { parseResumeWithAI, generateIcebreaker } from "../services/ai.service.js
 import Profile from "../models/profile.model.js"
 import ChatRoom from "../models/chatroom.model.js"
 
-// Issue #4 Fix: Resolve pdf-parse ONCE at module load, not per-request
-const require = createRequire(import.meta.url)
-const pdfParse = require("pdf-parse")
+import { PDFParse } from "pdf-parse"
 
 const AI_TIMEOUT_MS = 15_000
 
@@ -36,7 +34,8 @@ const parseResume = asyncHandler(async (req, res) => {
   try {
     // Issue #3 Fix: Non-blocking async file read
     const pdfBuffer = await fs.promises.readFile(resumeLocalPath)
-    const pdfData = await pdfParse(pdfBuffer)
+    const parser = new PDFParse(new Uint8Array(pdfBuffer))
+    const pdfData = await parser.getText()
     const rawText = pdfData.text
 
     if (!rawText || rawText.trim().length < 50) {
@@ -71,7 +70,7 @@ const parseResume = asyncHandler(async (req, res) => {
     const updatedProfile = await Profile.findOneAndUpdate(
       { user: req.user._id },
       { $set: { skills: safeSkills, bio: safeBio, lookingFor: safeLookingFor } },
-      { new: true, upsert: true }
+      { returnDocument: "after", upsert: true }
     )
 
     return res.status(200).json(

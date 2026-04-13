@@ -9,7 +9,7 @@ if (!process.env.GEMINI_API_KEY) {
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Single constant — one place to update when upgrading models
-const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 // Retry on transient 429/503 errors from Gemini
 const generateWithRetry = async (model, prompt, retries = 2) => {
@@ -103,14 +103,13 @@ const generateIcebreaker = async (
   const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
   const prompt = `
-    You are a friendly developer community bot.
-    Two developers just matched on DevSync:
-    - ${userAName} works with: ${stackA}
-    - ${userBName} works with: ${stackB}
+    You are ${userAName}, a developer on DevSync. You just matched with another developer named ${userBName}.
+    Your tech stack: ${stackA}
+    Their tech stack: ${stackB}
 
-    Write a single, natural, friendly icebreaker message (max 50 words) they can use to start chatting.
+    Write a single, natural, friendly icebreaker message (max 50 words) that you (${userAName}) are sending directly to ${userBName} to start chatting.
     Focus on their complementary tech stacks and potential collaboration.
-    Return ONLY the message text — no labels, no quotes.
+    Return ONLY the message text — no labels, no quotes, no placeholders, no subject lines. Act as if you are directly typing this to them in a chat window.
   `;
 
   try {

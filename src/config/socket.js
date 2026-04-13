@@ -140,6 +140,29 @@ const initializeSocket = (httpServer) => {
       await notifyPartners(io, userId, true)
     }
 
+    // ─── Send initial online status of chat partners to newly connected user ──
+    try {
+      const rooms = await ChatRoom.find({
+        participants: new mongoose.Types.ObjectId(userId),
+      }).select("participants")
+
+      const partnerIds = rooms.flatMap((r) =>
+        r.participants
+          .map((p) => p.toString())
+          .filter((id) => id !== userId)
+      )
+
+      const uniquePartnerIds = [...new Set(partnerIds)]
+      const onlineStatuses = uniquePartnerIds.map((partnerId) => ({
+        userId: partnerId,
+        isOnline: onlineUsers.has(partnerId),
+      }))
+
+      socket.emit("online-users", onlineStatuses)
+    } catch (err) {
+      console.error("[Socket] Failed to send initial online statuses:", err.message)
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // EVENT: join-room
     // ─────────────────────────────────────────────────────────────────────────────

@@ -31,15 +31,15 @@ const getRealIp = (req) => {
 
 // ─── AUTH LIMITER ─────────────────────────────────────────────────────────────
 export const authLimiter = rateLimit({
-  // windowMs: 15 * 60 * 1000,
-  // max: 10,
-  // standardHeaders: true,
-  // legacyHeaders: false,
-  // store: makeStore("auth"),
-  // keyGenerator: getRealIp,
-  // handler: make429Handler(
-  //   "Too many login attempts from this IP. Please try again after 15 minutes.",
-  // ),
+  windowMs: 15 * 60 * 1000,
+  max: 9999, // Removed strict rate limit for local dev
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: makeStore("auth"),
+  keyGenerator: getRealIp,
+  handler: make429Handler(
+    "Too many login attempts from this IP. Please try again after 15 minutes.",
+  ),
 });
 
 // ─── MATCH LIMITER ────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 
 const uploadDir = "./public/temp";
 
@@ -14,7 +15,7 @@ const storage = multer.diskStorage({
   },
   filename: function (req, file, cb) {
     const ext = path.extname(file.originalname);
-    const uniqueName = `${file.fieldname}-${Date.now()}${ext}`;
+    const uniqueName = `${file.fieldname}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}${ext}`;
     cb(null, uniqueName);
   },
 });

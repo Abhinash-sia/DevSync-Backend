@@ -40,21 +40,25 @@ const gracefulShutdown = async (signal) => {
   }, SHUTDOWN_TIMEOUT_MS)
   forceExit.unref()
 
-  httpServer.close(async () => {
-    clearTimeout(forceExit)
-    logger.info("HTTP server closed.")
+  // Close Socket.IO first — it holds persistent WebSocket connections open
+  // which prevents httpServer.close() from ever firing its callback.
+  io.close(() => {
+    httpServer.close(async () => {
+      clearTimeout(forceExit)
+      logger.info("HTTP server closed.")
 
-    try {
-      stopCronJobs()                       // ← stop cron before DB closes
-      await mongoose.connection.close()
-      logger.info("MongoDB connection closed.")
-      await redis.quit()                   // ← uncommented — properly closes Upstash TLS connection
-      logger.info("Redis connection closed.")
-    } catch (err) {
-      logger.error("Error during connection teardown:", err)
-    } finally {
-      process.exit(0)
-    }
+      try {
+        stopCronJobs()
+        await mongoose.connection.close()
+        logger.info("MongoDB connection closed.")
+        await redis.quit()
+        logger.info("Redis connection closed.")
+      } catch (err) {
+        logger.error("Error during connection teardown:", err)
+      } finally {
+        process.exit(0)
+      }
+    })
   })
 }
 

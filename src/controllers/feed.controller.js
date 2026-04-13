@@ -6,7 +6,7 @@ import ChatRoom from "../models/chatroom.model.js"
 import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/ApiError.js"
 import { ApiResponse } from "../utils/ApiResponse.js"
-import { getCache, setCache, deleteCache } from "../services/cache.services.js"
+import { getCache, setCache, deleteCache } from "../services/cache.service.js"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FEED_CACHE_TTL = 300          // 5 minutes
@@ -114,7 +114,7 @@ const swipeUser = asyncHandler(async (req, res) => {
   await Match.findOneAndUpdate(
     { sender: senderId, receiver: targetUserId },
     { $set: { status: action === "like" ? "interested" : "ignored" } },
-    { upsert: true, new: true, runValidators: true }
+    { upsert: true, returnDocument: "after", runValidators: true }
   )
 
   let isMatch  = false
@@ -132,13 +132,10 @@ const swipeUser = asyncHandler(async (req, res) => {
 
       // Issue #3 Fix: Use atomic findOneAndUpdate with upsert instead of findOne → create.
       // This eliminates the race condition where concurrent mutual likes create duplicate rooms.
-      // $setOnInsert only writes participants when the document is being CREATED (insert),
-      // not on subsequent updates — guaranteeing exactly one room per pair.
-      chatRoom = await ChatRoom.findOneAndUpdate(
-        { participants: { $all: [senderId, targetUserId] } },
-        { $setOnInsert: { participants: [senderId, targetUserId] } },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      )
+      chatRoom = await ChatRoom.findOne({ participants: { $all: [senderId, targetUserId] } })
+      if (!chatRoom) {
+        chatRoom = await ChatRoom.create({ participants: [senderId, targetUserId] })
+      }
 
       const io = req.app.get("io")
       if (io) {

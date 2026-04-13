@@ -52,7 +52,7 @@ const swipeDeveloper = asyncHandler(async (req, res) => {
   const swipe = await Match.findOneAndUpdate(
     { sender: senderId, receiver: userId },
     { $set: { status: action } },
-    { upsert: true, new: true, runValidators: true }
+    { upsert: true, returnDocument: "after", runValidators: true }
   )
 
   let isMatch  = false
@@ -68,12 +68,10 @@ const swipeDeveloper = asyncHandler(async (req, res) => {
     if (reverseSwipe) {
       isMatch = true
 
-      // Issue #7 Fix: Atomic findOneAndUpdate upsert — no duplicate room race condition
-      chatRoom = await ChatRoom.findOneAndUpdate(
-        { participants: { $all: [senderId, userId] } },
-        { $setOnInsert: { participants: [senderId, userId] } },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      )
+      chatRoom = await ChatRoom.findOne({ participants: { $all: [senderId, userId] } })
+      if (!chatRoom) {
+        chatRoom = await ChatRoom.create({ participants: [senderId, userId] })
+      }
 
       const io = req.app.get("io")
       if (io) {
@@ -171,7 +169,11 @@ const getDiscoveryFeed = asyncHandler(async (req, res) => {
   const slicedUsers  = hasMore ? users.slice(0, limit) : users
   const responseData = { users: slicedUsers, page, limit, nextPage: hasMore ? page + 1 : null }
 
-  await setCache(cacheKey, responseData, 3600)
+  if (slicedUsers.length > 0) {
+    // Only cache for 30 seconds to prevent aggressive staleness
+    // Don't cache empty results so the frontend Re-Scan button works instantly
+    await setCache(cacheKey, responseData, 30)
+  }
 
   return res
     .status(200)
@@ -187,22 +189,37 @@ const getConnections = asyncHandler(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 20, 50)
 
   const rooms = await ChatRoom.find({ participants: loggedInUserId })
-    .populate("participants", "name photoUrl") // Issue #4: profile fields removed (wrong model)
+    .populate("participants", "name")
     .populate({ path: "lastMessage", populate: { path: "sender", select: "name" } })
     .sort({ updatedAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
 
+  const otherUserIds = rooms.flatMap((room) =>
+    room.participants.filter((p) => p && String(p._id) !== String(loggedInUserId)).map((p) => p._id)
+  )
+
+  const profiles = await Profile.find({ user: { $in: otherUserIds } }).select("user photoUrl skills bio githubUrl").lean()
+  const profileMap = profiles.reduce((acc, profile) => {
+    acc[String(profile.user)] = profile
+    return acc
+  }, {})
+
   const connections = rooms
     .map((room) => {
-      // Issue #9 Fix: Guard against deleted participant before calling .toObject()
       const otherUser = room.participants.find(
         (p) => p && String(p._id) !== String(loggedInUserId)
       )
       if (!otherUser) return null
 
+      const userProfile = profileMap[String(otherUser._id)] || {}
+
       return {
         ...otherUser.toObject(),
+        photoUrl: userProfile.photoUrl || null,
+        skills: userProfile.skills || [],
+        bio: userProfile.bio || "",
+        githubUrl: userProfile.githubUrl || "",
         roomId: room._id,
         lastMessage: room.lastMessage || null,
         updatedAt: room.updatedAt,

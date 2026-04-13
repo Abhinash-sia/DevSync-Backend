@@ -1,7 +1,7 @@
 import redis from "../config/redis.js"
 
 // Helper to check if we can safely query Redis
-const isCacheReady = () => redis.status === "ready"
+const isCacheReady = () => redis.isReady
 
 const setCache = async (key, data, ttlSeconds = 3600) => {
   if (!isCacheReady()) return false

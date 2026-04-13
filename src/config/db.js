@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
-// Replace with your Winston logger from Phase 7 when ready
-const log = console;
+import logger from "../utils/logger.js";
+
+const log = logger;
 
 const connectDB = async () => {
   // Issue #1 Fix: Validate env variable before doing anything
@@ -32,12 +33,7 @@ const connectDB = async () => {
       log.error(`MongoDB runtime error: ${err.message}`)
     );
 
-    // Issue #7 Fix: Graceful shutdown on process termination signals
-    process.on("SIGINT", async () => {
-      await db.close();
-      log.info("MongoDB connection closed on app termination.");
-      process.exit(0);
-    });
+    // Graceful shutdown is handled by server.js — no duplicate SIGINT handler here
   } catch (error) {
     // Issue #4 Fix: Log only error.message — never the full object (exposes URI + credentials)
     log.error(`MongoDB connection FAILED: ${error.message}`);

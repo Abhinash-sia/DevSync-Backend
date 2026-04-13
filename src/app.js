@@ -47,6 +47,11 @@ app.use("/api/v1/ai", aiRoutes);
 app.use("/api/v1/gig", gigRoutes);
 app.use("/api/v1/profile", profileRoutes);
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok", uptime: process.uptime() })
+})
+
 // 404 Catch-All for undefined API routes
 app.all("*", (req, res, next) => {
   const error = new Error(`Route ${req.originalUrl} not found`);

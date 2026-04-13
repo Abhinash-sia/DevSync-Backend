@@ -33,6 +33,10 @@ const profileSchema = new Schema(
       default: "",
       trim: true,
     },
+    photoPublicId: {
+      type: String,
+      default: "",
+    },
     resumeUrl: {
       type: String,
       default: "",

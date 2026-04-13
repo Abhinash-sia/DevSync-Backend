@@ -1,5 +1,12 @@
 import jwt from "jsonwebtoken"
+import mongoose from "mongoose"
 import User from "../models/user.model.js"
+import Profile from "../models/profile.model.js"
+import Gig from "../models/gig.model.js"
+import Match from "../models/match.model.js"
+import ChatRoom from "../models/chatroom.model.js"
+import Message from "../models/message.model.js"
+import { deleteFromCloudinary } from "../utils/cloudinary.js"
 import { ApiError } from "../utils/ApiError.js"
 import { ApiResponse } from "../utils/ApiResponse.js"
 import { asyncHandler } from "../utils/asyncHandler.js"
@@ -36,7 +43,7 @@ const refreshCookieOptions = { ...baseCookieOptions, maxAge: REFRESH_TOKEN_EXPIR
 
 // ─── registerUser ─────────────────────────────────────────────────────────────
 const registerUser = asyncHandler(async (req, res) => {
-  const { name, email, password, skills = [], github = "" } = req.body
+  const { name, email, password } = req.body
 
   if ([name, email, password].some((f) => !f || !String(f).trim())) {
     throw new ApiError(400, "Name, email, and password are required")
@@ -63,8 +70,6 @@ const registerUser = asyncHandler(async (req, res) => {
     name: name.trim(),
     email: email.toLowerCase().trim(),
     password,
-    skills: Array.isArray(skills) ? skills : [],
-    githubUrl: github?.trim?.() || "",
   })
 
   // Issue #6 Fix: Pass user object directly — no second DB call
@@ -115,13 +120,13 @@ const logoutUser = asyncHandler(async (req, res) => {
   await User.findByIdAndUpdate(
     req.user._id,
     { $unset: { refreshToken: 1 } },
-    { new: true }
+    { returnDocument: "after" }
   )
 
   return res
     .status(200)
-    .clearCookie("accessToken",  accessCookieOptions)
-    .clearCookie("refreshToken", refreshCookieOptions)
+    .clearCookie("accessToken",  baseCookieOptions)
+    .clearCookie("refreshToken", baseCookieOptions)
     .json(new ApiResponse(200, {}, "User logged out successfully"))
 })
 
@@ -172,4 +177,83 @@ const getCurrentUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, req.user, "Current user fetched successfully"))
 })
 
-export { registerUser, loginUser, logoutUser, refreshAccessToken, getCurrentUser }
+// ─── deleteAccount ────────────────────────────────────────────────────────────
+const deleteAccount = asyncHandler(async (req, res) => {
+  const userId = req.user._id
+
+  // 1. Image Cleanup from Cloudinary
+  const profile = await Profile.findOne({ user: userId }).select("photoPublicId")
+  if (profile && profile.photoPublicId) {
+    try {
+      await deleteFromCloudinary(profile.photoPublicId)
+    } catch (err) {
+      console.error(`[Cloudinary] Failed to delete photo for user ${userId}:`, err.message)
+      // Non-fatal, continue with DB deletion
+    }
+  }
+
+  // 2. Database Cleanup in a Transaction (if replica set allows)
+  const session = await mongoose.startSession()
+  try {
+    await session.withTransaction(async () => {
+      // a) Delete profile
+      await Profile.findOneAndDelete({ user: userId }, { session })
+
+      // b) Delete authored Gigs
+      await Gig.deleteMany({ author: userId }, { session })
+
+      // c) Remove user from applicants of other people's Gigs
+      await Gig.updateMany(
+        { applicants: userId },
+        { $pull: { applicants: userId } },
+        { session }
+      )
+
+      // d) Delete all Matches involving this user
+      await Match.deleteMany(
+        { $or: [{ sender: userId }, { receiver: userId }] },
+        { session }
+      )
+
+      // e) Find ChatRooms user is in, delete all messages inside those rooms, then delete rooms
+      const chatRooms = await ChatRoom.find({ participants: userId }).select("_id").session(session)
+      const chatRoomIds = chatRooms.map(r => r._id)
+      
+      await Message.deleteMany({ chatRoom: { $in: chatRoomIds } }, { session })
+      await ChatRoom.deleteMany({ participants: userId }, { session })
+
+      // f) Finally delete the user account
+      await User.findByIdAndDelete(userId, { session })
+    })
+  } catch (err) {
+    // If we're not running a MongoDB replica set, transactions throw. 
+    // Fallback to non-transactional deletion. Local isolated drops.
+    if (err.message.includes("transaction")) {
+       console.log("No replica set detected. Performing non-transactional cascade deletion.")
+       await Profile.findOneAndDelete({ user: userId })
+       await Gig.deleteMany({ author: userId })
+       await Gig.updateMany({ applicants: userId }, { $pull: { applicants: userId } })
+       await Match.deleteMany({ $or: [{ sender: userId }, { receiver: userId }] })
+       
+       const chatRooms = await ChatRoom.find({ participants: userId }).select("_id")
+       const chatRoomIds = chatRooms.map(r => r._id)
+       await Message.deleteMany({ chatRoom: { $in: chatRoomIds } })
+       await ChatRoom.deleteMany({ participants: userId })
+       
+       await User.findByIdAndDelete(userId)
+    } else {
+       throw new ApiError(500, "Account deletion failed during transaction")
+    }
+  } finally {
+    await session.endSession()
+  }
+
+  // Clear auth cookies
+  return res
+    .status(200)
+    .clearCookie("accessToken", baseCookieOptions)
+    .clearCookie("refreshToken", baseCookieOptions)
+    .json(new ApiResponse(200, {}, "Account entirely deleted and scrubbed from database"))
+})
+
+export { registerUser, loginUser, logoutUser, refreshAccessToken, getCurrentUser, deleteAccount }

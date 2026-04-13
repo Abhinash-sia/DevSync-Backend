@@ -23,26 +23,6 @@ const userSchema = new Schema(
       required: [true, "Password is required"],
       minlength: [8, "Password must be at least 8 characters"],
     },
-    skills: {
-      type: [String],
-      default: [],
-    },
-    githubUrl: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-    photoUrl: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-    bio: {
-      type: String,
-      default: "",
-      trim: true,
-      maxlength: [500, "Bio cannot exceed 500 characters"],
-    },
     refreshToken: {
       type: String,
       default: "",

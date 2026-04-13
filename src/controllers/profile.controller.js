@@ -16,19 +16,7 @@ const MAX_LOCATION_LENGTH   = 100
 const ALLOWED_MIME_TYPES    = ["image/jpeg", "image/png", "image/webp"]
 const MAX_PHOTO_SIZE        = 5 * 1024 * 1024
 
-// ─── normalizeSkills (unchanged — already correct) ───────────────────────────
-const normalizeSkills = (value) => {
-  if (!value) return []
-  if (Array.isArray(value)) return value.map((i) => String(i).trim()).filter(Boolean)
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value)
-      if (Array.isArray(parsed)) return parsed.map((i) => String(i).trim()).filter(Boolean)
-    } catch {}
-    return value.split(",").map((i) => i.trim()).filter(Boolean)
-  }
-  return []
-}
+import { normalizeSkills } from "../utils/normalizeSkills.js"
 
 // ─── URL validator ────────────────────────────────────────────────────────────
 // Issue #8 Fix: Validates URL protocol + optional hostname enforcement
@@ -145,7 +133,7 @@ const updateProfile = asyncHandler(async (req, res) => {
   const updatedProfile = await Profile.findOneAndUpdate(
     { user: req.user._id },
     { $set: profileUpdateData, $setOnInsert: { user: req.user._id } },
-    { new: true, upsert: true, runValidators: true }
+    { returnDocument: "after", upsert: true, runValidators: true }
   )
 
   return res.status(200).json(
@@ -175,12 +163,10 @@ const uploadProfilePhoto = asyncHandler(async (req, res) => {
   let uploaded
   try {
     uploaded = await uploadOnCloudinary(req.file.path)
-  } finally {
-    // Issue #10 Fix: Always clean up temp file — success or failure
-    await fs.promises.unlink(req.file.path).catch((err) =>
-      console.error("[Profile] Failed to delete temp photo:", err.message)
-    )
+  } catch (err) {
+    throw new ApiError(500, "Photo upload failed")
   }
+  // Note: temp file cleanup is handled by cloudinary.js internally
 
   if (!uploaded?.secure_url) throw new ApiError(500, "Photo upload failed")
 
@@ -198,7 +184,7 @@ const uploadProfilePhoto = asyncHandler(async (req, res) => {
       $set: { photoUrl: uploaded.secure_url, photoPublicId: uploaded.public_id },
       $setOnInsert: { user: req.user._id },
     },
-    { new: true, upsert: true }
+    { returnDocument: "after", upsert: true }
   )
 
   return res.status(200).json(
