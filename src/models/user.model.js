@@ -27,6 +27,10 @@ const userSchema = new Schema(
       type: String,
       default: "",
     },
+    lastLogin: {
+      type: Date,
+      default: Date.now,
+    },
   },
   { timestamps: true }
 );

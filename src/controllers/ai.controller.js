@@ -1,5 +1,4 @@
 import fs from "fs"
-import { createRequire } from "module"
 import mongoose from "mongoose"
 import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/ApiError.js"
@@ -35,8 +34,8 @@ const parseResume = asyncHandler(async (req, res) => {
     // Issue #3 Fix: Non-blocking async file read
     const pdfBuffer = await fs.promises.readFile(resumeLocalPath)
     const parser = new PDFParse(new Uint8Array(pdfBuffer))
-    const pdfData = await parser.getText()
-    const rawText = pdfData.text
+    // getText() returns a Promise<string> — not an object with a .text property
+    const rawText = await parser.getText()
 
     if (!rawText || rawText.trim().length < 50) {
       throw new ApiError(400, "Could not extract text from PDF. Try a text-based PDF.")

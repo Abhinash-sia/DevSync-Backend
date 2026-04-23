@@ -52,6 +52,7 @@ const getOwnProfile = asyncHandler(async (req, res) => {
     linkedinUrl: profile?.linkedinUrl || "",
     location:    profile?.location    || "",
     lookingFor:  profile?.lookingFor  || "",
+    codeSnippet: profile?.codeSnippet || { code: "", language: "javascript", title: "" },
     // Issue #7 Fix: Real computed stats
     stats: { connections: connectionsCount, gigsPosted: gigsPostedCount },
   }
@@ -85,6 +86,7 @@ const getPublicProfile = asyncHandler(async (req, res) => {
       skills:    profile?.skills?.length ? profile.skills : [],
       photoUrl:  profile?.photoUrl    || "",
       githubUrl: profile?.githubUrl   || "",
+      codeSnippet: profile?.codeSnippet || null,
       createdAt: user.createdAt,
     },
   }
@@ -94,7 +96,7 @@ const getPublicProfile = asyncHandler(async (req, res) => {
 
 // ─── updateProfile ────────────────────────────────────────────────────────────
 const updateProfile = asyncHandler(async (req, res) => {
-  const { bio, skills, githubUrl, linkedinUrl, lookingFor, location } = req.body
+  const { bio, skills, githubUrl, linkedinUrl, lookingFor, location, codeSnippet } = req.body
 
   // Issue #9 Fix: Length limits on all text fields
   if (bio !== undefined && bio.length > MAX_BIO_LENGTH) {
@@ -105,6 +107,9 @@ const updateProfile = asyncHandler(async (req, res) => {
   }
   if (location !== undefined && location.length > MAX_LOCATION_LENGTH) {
     throw new ApiError(400, `Location cannot exceed ${MAX_LOCATION_LENGTH} characters`)
+  }
+  if (codeSnippet?.code !== undefined && codeSnippet.code.length > 1000) {
+    throw new ApiError(400, `Code snippet cannot exceed 1000 characters`)
   }
 
   // Issue #8 Fix: Validate URLs before saving
@@ -129,6 +134,7 @@ const updateProfile = asyncHandler(async (req, res) => {
   if (lookingFor  !== undefined) profileUpdateData.lookingFor  = lookingFor.trim()
   if (location    !== undefined) profileUpdateData.location    = location.trim()
   if (parsedSkills !== undefined) profileUpdateData.skills     = parsedSkills
+  if (codeSnippet !== undefined) profileUpdateData.codeSnippet = codeSnippet
 
   const updatedProfile = await Profile.findOneAndUpdate(
     { user: req.user._id },

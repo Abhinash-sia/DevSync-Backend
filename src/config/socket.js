@@ -10,6 +10,11 @@ import ChatRoom from "../models/chatroom.model.js"
 // userId (string) → Set<socketId (string)>
 const onlineUsers = new Map()
 
+// ─── Perf Fix ─────────────────────────────────────────────────────────────────
+// Cache partner IDs per user so disconnect path never needs a DB query.
+// userId (string) → string[]
+const partnerCache = new Map()
+
 // ─── Issue #4 Fix ─────────────────────────────────────────────────────────────
 // Per-socket, per-event rate limiter (no extra library needed).
 const eventCounters = {}
@@ -34,25 +39,32 @@ const isRateLimited = (socketId, event) => {
   return eventCounters[key].count > rule.max
 }
 
-// ─── Helper: Notify only relevant chatroom partners ───────────────────────────
-// Issue #1 Fix: Never broadcast online status to strangers.
+// Helper: Notify only relevant chatroom partners
+// Uses in-memory partnerCache populated on connect to avoid DB hit on disconnect.
 const notifyPartners = async (io, userId, isOnline) => {
   try {
-    const rooms = await ChatRoom.find({
-      participants: new mongoose.Types.ObjectId(userId),
-    }).select("participants")
+    let partnerIds = partnerCache.get(userId)
 
-    const partnerIds = rooms.flatMap((r) =>
-      r.participants
-        .map((p) => p.toString())
-        .filter((id) => id !== userId)
-    )
+    if (!partnerIds) {
+      // Only hits DB if cache miss (e.g. first connect)
+      const rooms = await ChatRoom.find({
+        participants: new mongoose.Types.ObjectId(userId),
+      }).select("participants")
+
+      partnerIds = rooms.flatMap((r) =>
+        r.participants
+          .map((p) => p.toString())
+          .filter((id) => id !== userId)
+      )
+      partnerCache.set(userId, partnerIds)
+    }
 
     partnerIds.forEach((partnerId) => {
       io.to(`user:${partnerId}`).emit("online-status", { userId, isOnline })
     })
+
+    if (!isOnline) partnerCache.delete(userId)
   } catch (err) {
-    // Non-critical — log and swallow. Don't crash the connection handler.
     console.error("[Socket] Failed to notify partners of online status:", err.message)
   }
 }
@@ -134,13 +146,7 @@ const initializeSocket = (httpServer) => {
     // Join personal notification room
     socket.join(`user:${userId}`)
 
-    // ─── Issue #1 Fix: Only notify chatroom partners, not all users ────────────
-    // Only emit online if this is the FIRST tab/socket for this user
-    if (onlineUsers.get(userId).size === 1) {
-      await notifyPartners(io, userId, true)
-    }
-
-    // ─── Send initial online status of chat partners to newly connected user ──
+    // Perf: Query ChatRoom ONCE — populate partnerCache AND send initial online-statuses together
     try {
       const rooms = await ChatRoom.find({
         participants: new mongoose.Types.ObjectId(userId),
@@ -152,6 +158,17 @@ const initializeSocket = (httpServer) => {
           .filter((id) => id !== userId)
       )
 
+      // Populate cache so disconnect path never needs a DB hit
+      partnerCache.set(userId, partnerIds)
+
+      // Only broadcast online if this is the FIRST tab/socket for this user
+      if (onlineUsers.get(userId).size === 1) {
+        partnerIds.forEach((partnerId) => {
+          io.to(`user:${partnerId}`).emit("online-status", { userId, isOnline: true })
+        })
+      }
+
+      // Send current online status of partners to the newly connected user
       const uniquePartnerIds = [...new Set(partnerIds)]
       const onlineStatuses = uniquePartnerIds.map((partnerId) => ({
         userId: partnerId,
@@ -160,7 +177,7 @@ const initializeSocket = (httpServer) => {
 
       socket.emit("online-users", onlineStatuses)
     } catch (err) {
-      console.error("[Socket] Failed to send initial online statuses:", err.message)
+      console.error("[Socket] Failed to send initial online statuses / populate partner cache:", err.message)
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

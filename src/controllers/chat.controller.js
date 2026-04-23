@@ -4,6 +4,7 @@ import Message from "../models/message.model.js"
 import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/ApiError.js"
 import { ApiResponse } from "../utils/ApiResponse.js"
+// Note: mongoose import kept for ObjectId.isValid() calls — session removed (perf fix)
 
 const MAX_MESSAGE_LENGTH = 2000
 
@@ -114,35 +115,33 @@ const sendMessage = asyncHandler(async (req, res) => {
   })
   if (!chatRoom) throw new ApiError(404, "Chat room not found or access denied")
 
-  // Issue #2 Fix: Atomic transaction — Message.create + ChatRoom update together
-  const session = await mongoose.startSession()
-  let populatedMessage
+  // Perf: Skip the Mongoose session/transaction — these two writes are independent
+  // and a transaction on Atlas free-tier adds ~200-400ms per message.
+  const message = await Message.create({
+    chatRoom: chatRoomId,
+    sender: req.user._id,
+    content: content.trim(),
+    status: "sent",
+  })
 
-  try {
-    await session.withTransaction(async () => {
-      const [message] = await Message.create(
-        [{ chatRoom: chatRoomId, sender: req.user._id, content: content.trim(), status: "sent" }],
-        { session }
-      )
+  // Fire-and-forget: ChatRoom lastMessage update doesn't need to block the response
+  ChatRoom.findByIdAndUpdate(
+    chatRoomId,
+    { $set: { lastMessage: message._id, updatedAt: new Date() } }
+  ).catch((err) => console.error("[Chat] Failed to update lastMessage:", err.message))
 
-      // Issue #10 Fix: Explicit $set to avoid operator mixing ambiguity
-      await ChatRoom.findByIdAndUpdate(
-        chatRoomId,
-        { $set: { lastMessage: message._id, updatedAt: new Date() } },
-        { session }
-      )
-
-      // Issue #3 Fix: Populate in-place — no separate findById needed
-      populatedMessage = await message.populate("sender", "name photoUrl githubUrl")
-    })
-  } finally {
-    await session.endSession()
-  }
+  const populatedMessage = await message.populate("sender", "name photoUrl githubUrl")
 
   // Issue #9 Fix: Warn if io is not set up instead of silently skipping
   const io = req.app.get("io")
   if (io) {
-    io.to(chatRoomId).emit("message", { roomId: chatRoomId, message: populatedMessage })
+    let broadcast = io.to(chatRoomId)
+    // Also emit specifically to each participant's user channel
+    // so they receive notifications even if they haven't explicitly joined the chatRoomId channel.
+    chatRoom.participants.forEach((p) => {
+      broadcast = broadcast.to(`user:${p.toString()}`)
+    })
+    broadcast.emit("message", { roomId: chatRoomId, message: populatedMessage })
   } else {
     console.warn("[Chat] Socket.io not initialized — real-time broadcast skipped:", populatedMessage._id)
   }

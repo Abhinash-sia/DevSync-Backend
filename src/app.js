@@ -10,6 +10,7 @@ import chatRoutes from "./routes/chat.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
 import gigRoutes from "./routes/gig.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
+import statsRoutes from "./routes/stats.routes.js";
 
 import {
   authLimiter,
@@ -22,9 +23,20 @@ const app = express();
 
 // Security Middlewares
 app.use(helmet());
+const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173")
+  .split(",")
+  .map((o) => o.trim())
+
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    origin: (origin, callback) => {
+      // Allow server-to-server requests (no origin) and listed origins
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true)
+      } else {
+        callback(new Error(`CORS blocked for origin: ${origin}`))
+      }
+    },
     credentials: true,
   })
 );
@@ -46,6 +58,7 @@ app.use("/api/v1/chat", chatRoutes);
 app.use("/api/v1/ai", aiRoutes);
 app.use("/api/v1/gig", gigRoutes);
 app.use("/api/v1/profile", profileRoutes);
+app.use("/api/v1/stats", statsRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {

@@ -20,6 +20,7 @@ const generateTokens = async (user) => {
   const refreshToken = user.generateRefreshToken()
 
   user.refreshToken = refreshToken
+  user.lastLogin = new Date()
   await user.save({ validateBeforeSave: false })
 
   return { accessToken, refreshToken }

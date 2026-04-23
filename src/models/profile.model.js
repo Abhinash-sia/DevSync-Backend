@@ -47,6 +47,22 @@ const profileSchema = new Schema(
       default: "",
       trim: true,
     },
+    codeSnippet: {
+      code: {
+        type: String,
+        maxlength: [1000, "Code snippet cannot exceed 1000 characters"],
+        default: "",
+      },
+      language: {
+        type: String,
+        default: "javascript",
+      },
+      title: {
+        type: String,
+        maxlength: [50, "Title cannot exceed 50 characters"],
+        default: "",
+      }
+    },
     lookingFor: {
       type: String,
       enum: ["hackathon", "freelance", "cofounder", "openSource", ""],
