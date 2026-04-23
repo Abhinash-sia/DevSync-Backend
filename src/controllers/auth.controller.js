@@ -1,12 +1,16 @@
 import jwt from "jsonwebtoken"
+import crypto from "crypto"
+import bcrypt from "bcrypt"
 import mongoose from "mongoose"
 import User from "../models/user.model.js"
+import Token from "../models/token.model.js"
 import Profile from "../models/profile.model.js"
 import Gig from "../models/gig.model.js"
 import Match from "../models/match.model.js"
 import ChatRoom from "../models/chatroom.model.js"
 import Message from "../models/message.model.js"
 import { deleteFromCloudinary } from "../utils/cloudinary.js"
+import { sendPasswordResetEmail } from "../utils/email.js"
 import { ApiError } from "../utils/ApiError.js"
 import { ApiResponse } from "../utils/ApiResponse.js"
 import { asyncHandler } from "../utils/asyncHandler.js"
@@ -257,4 +261,92 @@ const deleteAccount = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, {}, "Account entirely deleted and scrubbed from database"))
 })
 
-export { registerUser, loginUser, logoutUser, refreshAccessToken, getCurrentUser, deleteAccount }
+// ─── forgotPassword ───────────────────────────────────────────────────────────
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body
+
+  if (!email?.trim()) {
+    throw new ApiError(400, "Email is required")
+  }
+
+  // Always return 200 — never reveal whether email exists (prevents enumeration)
+  const user = await User.findOne({ email: email.toLowerCase().trim() })
+  if (!user) {
+    return res
+      .status(200)
+      .json(new ApiResponse(200, {}, "If that email is registered, a reset link has been sent"))
+  }
+
+  // Ensure only one active token per user
+  await Token.deleteMany({ userId: user._id })
+
+  // Generate cryptographically secure raw token
+  const rawToken = crypto.randomBytes(32).toString("hex")
+
+  // Hash the token using bcrypt before saving
+  const hashedToken = await bcrypt.hash(rawToken, 10)
+
+  await Token.create({
+    userId: user._id,
+    token: hashedToken,
+  })
+
+  try {
+    await sendPasswordResetEmail(user.email, user._id, rawToken)
+  } catch (err) {
+    // Clean up if email fails
+    await Token.deleteMany({ userId: user._id })
+    console.error("[Auth] Failed to send reset email:", err.message)
+    throw new ApiError(500, "Failed to send reset email. Please try again.")
+  }
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {}, "If that email is registered, a reset link has been sent"))
+})
+
+// ─── resetPassword ────────────────────────────────────────────────────────────
+const resetPassword = asyncHandler(async (req, res) => {
+  const { userId, token } = req.params
+  const { password } = req.body
+
+  if (!userId || !token) throw new ApiError(400, "Invalid or missing reset token parameters")
+  if (!password?.trim()) throw new ApiError(400, "New password is required")
+  if (password.length < 8) throw new ApiError(400, "Password must be at least 8 characters")
+  if (!/(?=.*[a-zA-Z])(?=.*\d)/.test(password)) {
+    throw new ApiError(400, "Password must contain at least one letter and one number")
+  }
+
+  // Find the token document
+  const tokenDoc = await Token.findOne({ userId })
+  if (!tokenDoc) {
+    throw new ApiError(400, "Reset link is invalid or has expired. Please request a new one.")
+  }
+
+  // Compare raw URL token against stored bcrypt hash
+  const isValid = await bcrypt.compare(token, tokenDoc.token)
+  if (!isValid) {
+    throw new ApiError(400, "Reset link is invalid or has expired. Please request a new one.")
+  }
+
+  const user = await User.findById(userId)
+  if (!user) {
+    throw new ApiError(404, "User not found")
+  }
+
+  // Assign new password; User model pre-save hook handles hashing
+  user.password = password
+  
+  // Invalidate existing sessions by clearing refresh token
+  user.refreshToken = ""
+  await user.save()
+
+  // Clean up the used token
+  await tokenDoc.deleteOne()
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {}, "Password reset successfully. Please log in with your new password."))
+})
+
+export { registerUser, loginUser, logoutUser, refreshAccessToken, getCurrentUser, deleteAccount, forgotPassword, resetPassword }

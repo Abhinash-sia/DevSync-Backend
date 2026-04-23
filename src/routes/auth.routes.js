@@ -6,6 +6,8 @@ import {
   refreshAccessToken,
   getCurrentUser,
   deleteAccount,
+  forgotPassword,
+  resetPassword,
 } from "../controllers/auth.controller.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 
@@ -17,5 +19,7 @@ router.post("/logout", verifyJWT, logoutUser);
 router.post("/refresh", refreshAccessToken);
 router.get("/me", verifyJWT, getCurrentUser);
 router.delete("/delete-account", verifyJWT, deleteAccount);
+router.post("/forgot-password", forgotPassword);
+router.post("/reset-password/:userId/:token", resetPassword);
 
 export default router;
