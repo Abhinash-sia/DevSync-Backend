@@ -4,6 +4,7 @@ import {
   getPublicProfile,
   updateProfile,
   uploadProfilePhoto,
+  getAllProfiles,
 } from "../controllers/profile.controller.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 import { upload } from "../middlewares/upload.middleware.js";
@@ -19,6 +20,7 @@ router.post(
   uploadProfilePhoto
 );
 
+router.get("/directory/all", verifyJWT, getAllProfiles);
 router.get("/:userId", getPublicProfile);
 
 export default router;

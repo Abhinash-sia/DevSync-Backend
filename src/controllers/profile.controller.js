@@ -198,4 +198,80 @@ const uploadProfilePhoto = asyncHandler(async (req, res) => {
   )
 })
 
-export { getOwnProfile, getPublicProfile, updateProfile, uploadProfilePhoto }
+// ─── getAllProfiles ───────────────────────────────────────────────────────────
+const getAllProfiles = asyncHandler(async (req, res) => {
+  const { search, sortBy = "newest", dateFrom, dateTo } = req.query;
+
+  const matchStage = {};
+
+  if (dateFrom || dateTo) {
+    matchStage.createdAt = {};
+    if (dateFrom) matchStage.createdAt.$gte = new Date(dateFrom);
+    if (dateTo) matchStage.createdAt.$lte = new Date(dateTo);
+  }
+
+  const searchRegex = search ? { $regex: search, $options: "i" } : null;
+
+  const pipeline = [
+    { $match: matchStage },
+    {
+      $lookup: {
+        from: "profiles",
+        localField: "_id",
+        foreignField: "user",
+        as: "profileData"
+      }
+    },
+    {
+      $unwind: { 
+        path: "$profileData", 
+        preserveNullAndEmptyArrays: true 
+      }
+    }
+  ];
+
+  if (searchRegex) {
+    pipeline.push({
+      $match: {
+        $or: [
+          { name: searchRegex },
+          { email: searchRegex },
+          { "profileData.bio": searchRegex },
+          { "profileData.skills": searchRegex }
+        ]
+      }
+    });
+  }
+
+  pipeline.push({
+    $sort: { createdAt: sortBy === "oldest" ? 1 : -1 }
+  });
+
+  pipeline.push({
+    $project: {
+      password: 0,
+      refreshToken: 0
+    }
+  });
+
+  const rawUsers = await User.aggregate(pipeline);
+
+  const formattedUsers = rawUsers.map(u => ({
+    _id: u._id,
+    name: u.name,
+    email: u.email,
+    createdAt: u.createdAt,
+    bio: u.profileData?.bio || "",
+    skills: u.profileData?.skills || [],
+    photoUrl: u.profileData?.photoUrl || "",
+    githubUrl: u.profileData?.githubUrl || "",
+    location: u.profileData?.location || "",
+    lookingFor: u.profileData?.lookingFor || ""
+  }));
+
+  return res.status(200).json(
+    new ApiResponse(200, formattedUsers, "Directory fetched successfully")
+  );
+});
+
+export { getOwnProfile, getPublicProfile, updateProfile, uploadProfilePhoto, getAllProfiles }

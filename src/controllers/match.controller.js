@@ -3,6 +3,7 @@ import Match from "../models/match.model.js"
 import User from "../models/user.model.js"
 import Profile from "../models/profile.model.js"
 import ChatRoom from "../models/chatroom.model.js"
+import Notification from "../models/notification.model.js"
 import { asyncHandler } from "../utils/asyncHandler.js"
 import { ApiError } from "../utils/ApiError.js"
 import { ApiResponse } from "../utils/ApiResponse.js"
@@ -98,8 +99,36 @@ const swipeDeveloper = asyncHandler(async (req, res) => {
             githubUrl: senderProfile?.githubUrl,
           },
         })
+        
+        const notification = await Notification.create({
+          recipient: userId,
+          sender: senderId,
+          type: "connection_accepted",
+          message: `${req.user.name} matched with you!`,
+        })
+
+        io.to(`user:${String(userId)}`).emit("new-notification", {
+          ...notification.toObject(),
+          sender: { _id: senderId, name: req.user.name, photoUrl: senderProfile?.photoUrl }
+        })
       } else {
         console.warn("[Match] Socket.io not initialized — match event not broadcast")
+      }
+    } else {
+      // Not a match, just a connection request pointing one-way
+      const notification = await Notification.create({
+        recipient: userId,
+        sender: senderId,
+        type: "connection_request",
+        message: `${req.user.name} sent you a connection request`,
+      })
+
+      const io = req.app.get("io")
+      if (io) {
+        io.to(`user:${String(userId)}`).emit("new-notification", {
+          ...notification.toObject(),
+          sender: { _id: senderId, name: req.user.name, photoUrl: senderProfile?.photoUrl }
+        })
       }
     }
   }
@@ -232,4 +261,45 @@ const getConnections = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, connections, "Connections fetched successfully"))
 })
 
-export { swipeDeveloper, getDiscoveryFeed, getConnections }
+// ─── getMatchStatus ──────────────────────────────────────────────────────────
+const getMatchStatus = asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const loggedInUserId = req.user._id;
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(400, "Invalid user ID format");
+  }
+
+  // 1. Check if they are matched (ChatRoom exists)
+  const room = await ChatRoom.findOne({
+    participants: { $all: [loggedInUserId, userId] }
+  });
+
+  if (room) {
+    return res.status(200).json(
+      new ApiResponse(200, { status: "matched", roomId: room._id }, "Match status fetched")
+    );
+  }
+
+  // 2. Check pending requests
+  const [mySwipe, theirSwipe] = await Promise.all([
+    Match.findOne({ sender: loggedInUserId, receiver: userId, status: "interested" }),
+    Match.findOne({ sender: userId, receiver: loggedInUserId, status: "interested" })
+  ]);
+
+  let status = "none";
+  if (mySwipe && theirSwipe) {
+    // Edge case if room creation failed but both swiped
+    status = "matched";
+  } else if (mySwipe) {
+    status = "pending_them";
+  } else if (theirSwipe) {
+    status = "pending_me";
+  }
+
+  return res.status(200).json(
+    new ApiResponse(200, { status, roomId: null }, "Match status fetched")
+  );
+});
+
+export { swipeDeveloper, getDiscoveryFeed, getConnections, getMatchStatus }

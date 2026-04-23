@@ -11,6 +11,7 @@ import aiRoutes from "./routes/ai.routes.js";
 import gigRoutes from "./routes/gig.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
 import statsRoutes from "./routes/stats.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
 
 import {
   authLimiter,
@@ -59,6 +60,7 @@ app.use("/api/v1/ai", aiRoutes);
 app.use("/api/v1/gig", gigRoutes);
 app.use("/api/v1/profile", profileRoutes);
 app.use("/api/v1/stats", statsRoutes);
+app.use("/api/v1/notifications", notificationRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {
